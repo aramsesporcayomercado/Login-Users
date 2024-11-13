@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        label {
+            display: block;
+            margin-top: 10px;
+        }
+
+        input {
+            margin-bottom: 10px;
+            padding: 8px;
+            width: 200px;
+        }
+
+        button {
+            padding: 10px 15px;
+            margin-top: 10px;
+        }
+
+        .message {
+            margin-top: 10px;
+            color: green;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Login</h1>
+    <label for="username">Username:</label>
+    <input type="text" id="username" required><br>
+
+    <label for="password">Password:</label>
+    <input type="password" id="password" required><br>
+
+    <label for="token">Token:</label>
+    <input type="text" id="token"><br> <!-- Token no es obligatorio al inicio de sesión -->
+
+    <button id="loginButton" onclick="login()">Login</button>
+    <button id="generateTokenButton" onclick="generateToken()">Generar Token</button>
+
+    <div class="message" id="message"></div>
+
+    <script>
+        function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            // Imprimir los valores capturados en la consola
+            console.log(`Username: ${username}, Password: ${password}`);
+
+            if (!username || !password) {
+                alert('Por favor, completa todos los campos requeridos.');
+                return;
+            }
+
+            const loginButton = document.getElementById('loginButton');
+            loginButton.disabled = true;
+
+            fetch('https://localhost:8000/token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ username, password }),
+            })
+                .then(response => {
+                    if (!response.ok) throw new Error(`Failed to login: ${response.statusText}`);
+                    return response.json();
+                })
+                .then(data => {
+                    document.getElementById('message').textContent = 'Se ha enviado un correo con tu token de autenticación.';
+                    localStorage.setItem('userRole', data.role);
+
+                    // Verifica el token solo si está presente
+                    const token = document.getElementById('token').value;
+                    if (token) {
+                        verifyToken(token);
+                    }
+                })
+                .catch(error => {
+                    alert(error.message);
+                })
+                .finally(() => {
+                    loginButton.disabled = false;
+                });
+        }
+
+        function generateToken() {
+            const username = document.getElementById('username').value;
+
+            if (!username) {
+                alert('Por favor, ingresa tu nombre de usuario.');
+                return;
+            }
+
+            fetch('https://localhost:8000/token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ username }),
+            })
+                .then(response => {
+                    if (!response.ok) throw new Error('Failed to generate token');
+                    document.getElementById('message').textContent = 'Se ha enviado un correo con tu token de autenticación.';
+                    startCountdown(30);
+                })
+                .catch(error => {
+                    alert(error.message);
+                });
+        }
+
+        function startCountdown(seconds) {
+            const button = document.getElementById('generateTokenButton');
+            button.disabled = true; // Deshabilitar el botón
+
+            let countdown = seconds;
+            const interval = setInterval(() => {
+                if (countdown > 0) {
+                    button.textContent = `Generar Token (${countdown})`;
+                    countdown--;
+                } else {
+                    clearInterval(interval);
+                    button.textContent = `Generar Token`;
+                    button.disabled = false; // Habilitar el botón nuevamente
+                }
+            }, 1000); // Actualizar cada segundo
+        }
+
+        function verifyToken(token) {
+            fetch('https://localhost:8000/verify-token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ token }),
+            })
+                .then(response => {
+                    if (!response.ok) throw new Error('Invalid token');
+                    return response.json();
+                })
+                .then(data => {
+                    redirectToDashboard(data.role);
+                })
+                .catch(error => {
+                    document.getElementById('message').textContent = 'Token inválido. Por favor, inténtalo de nuevo.';
+                });
+        }
+
+        function redirectToDashboard(role) {
+            if (role === 'admin') {
+                window.location.href = '/admin.html'; // Cambia esta URL según tu estructura
+            } else if (role === 'support') {
+                window.location.href = '/support.html'; // Cambia esta URL según tu estructura
+            } else if (role === 'client') {
+                window.location.href = '/client.html'; // Cambia esta URL según tu estructura
+            } else {
+                alert("Invalid role");
+            }
+        }
+    </script>
+</body>
+
+</html>
