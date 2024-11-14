@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_mysqldb import MySQL
-from auth import validate_user, create_token, admin_required, send_email, log_activity, verify_token
+from auth.auth import validate_user, create_token, admin_required, send_email, log_activity, verify_token
 from config import SECRET_KEY, MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB
 
 app = Flask(__name__)
