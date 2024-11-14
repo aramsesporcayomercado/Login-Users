@@ -1,3 +1,5 @@
+# auth.py
+
 import base64
 from flask import jsonify, request
 from flask_mysqldb import MySQL
@@ -84,7 +86,7 @@ def send_email(to_email, subject, message_text):
 
     if not creds or not creds.valid:
         flow = InstalledAppFlow.from_client_secrets_file(
-            'client_secret.json', SCOPES)
+            'client_secret_711184362793-1m9afh2ag51rosfopjda4lmal5sos91u.apps.googleusercontent.com.json', SCOPES)
         creds = flow.run_local_server(port=0)
 
     service = build('gmail', 'v1', credentials=creds)
