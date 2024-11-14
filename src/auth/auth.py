@@ -1,103 +1,53 @@
 import base64
-from flask import Flask, jsonify, request
+from flask import jsonify, request
 from flask_mysqldb import MySQL
-from jose import jwt
+from jose import jwt, JWTError
 from datetime import datetime, timedelta
 from passlib.context import CryptContext
 from functools import wraps
-from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from email.mime.text import MIMEText
-from auth.activity_log import log_activity
+from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, SCOPES
 
-# Inicializar la aplicación y la conexión a MySQL
-app = Flask(__name__)
+# Inicialización de conexión MySQL
+mysql = MySQL()
 
-# Configuración de la base de datos desde config.py
-app.config['MYSQL_HOST'] = MYSQL_HOST
-app.config['MYSQL_USER'] = MYSQL_USER
-app.config['MYSQL_PASSWORD'] = MYSQL_PASSWORD
-app.config['MYSQL_DB'] = MYSQL_DB
-
-mysql = MySQL(app)
-
-# Configuraciones para el manejo de contraseñas y JWT
+# Configuración de contraseñas
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SCOPES = ['https://www.googleapis.com/auth/gmail.send']
 
 def get_cursor():
     """Obtiene un cursor para interactuar con la base de datos."""
     return mysql.connection.cursor()
 
-def create_email(subject, message_text, to):
-    """Crea un mensaje en formato MIME."""
-    message = MIMEText(message_text)
-    message['to'] = to
-    message['subject'] = subject
-    raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
-    return {'raw': raw_message}
-
-def send_email(to_email, subject, message_text):
-    """Envía un correo electrónico usando la API de Gmail."""
-    creds = None
-
-    # Cargar credenciales desde el archivo token.json (si existen)
-    try:
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    except Exception as e:
-        print("Error al cargar las credenciales:", e)
-
-    # Si no hay credenciales válidas, solicita al usuario que inicie sesión
-    if not creds or not creds.valid:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            'client_secret_711184362793-1m9afh2ag51rosfopjda4lmal5sos91u.apps.googleusercontent.com.json', SCOPES)
-        creds = flow.run_local_server(port=0)
-
-    service = build('gmail', 'v1', credentials=creds)
-
-    email_message = create_email(subject, message_text, to_email)
-    
-    try:
-        service.users().messages().send(userId='me', body=email_message).execute()
-        print("Correo enviado con éxito.")
-    except Exception as error:
-        print(f"Error al enviar el correo: {error}")
-
 def validate_user(username, password):
-    cursor = get_cursor()  # Obtiene un nuevo cursor
-
+    cursor = get_cursor()
     try:
         cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
-        user = cursor.fetchone()  # Obtiene el primer resultado
-
-        # Verifica si el usuario existe
+        user = cursor.fetchone()
+        
         if user is None:
             print(f"Usuario '{username}' no encontrado.")
-            return None  # El usuario no existe
-        
-        # Verifica si la contraseña es válida
-        if not password:  # Verifica si la contraseña está vacía
-            print("La contraseña está vacía.")
-            return None  # La contraseña no puede estar vacía
+            return None
 
-        if pwd_context.verify(password, user[9]):  # Asegúrate de que este índice sea correcto
-            return user
+        if not password or not pwd_context.verify(password, user[9]):
+            print("Contraseña incorrecta.")
+            return None
 
-        print("Contraseña incorrecta.")
-        return None  # La contraseña es incorrecta
-
+        return user
     finally:
-        cursor.close()  # Cierra el cursor al final
+        cursor.close()
 
 def create_token(data):
+    """Genera un token JWT para el usuario."""
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode = data.copy()
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def admin_required(f):
+    """Decorador para verificar rol de administrador."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         token = request.headers.get('Authorization')
@@ -116,39 +66,58 @@ def admin_required(f):
     
     return decorated_function
 
-@app.route('/token', methods=['POST'])
-def login():
-    username = request.json.get('username')
-    password = request.json.get('password')
+def create_email(subject, message_text, to):
+    """Crea un mensaje en formato MIME."""
+    message = MIMEText(message_text)
+    message['to'] = to
+    message['subject'] = subject
+    raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+    return {'raw': raw_message}
 
-    user = validate_user(username, password)
-    if user:
-        access_token = create_token({"sub": user[1], "role": user[8]})  # Suponiendo que el rol está en la columna 8
-        send_email(user[10], 'Tu Token de Autenticación', f'Tu token es: {access_token}')  # Suponiendo que el email está en la columna 10
-        log_activity(user[0], 'login', 'Usuario inició sesión exitosamente.')  # user[0] es el ID del usuario
-        return jsonify(access_token=access_token), 200
+def send_email(to_email, subject, message_text):
+    """Envía un correo electrónico usando la API de Gmail."""
+    creds = None
+    try:
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    except Exception as e:
+        print("Error al cargar las credenciales:", e)
 
-    return jsonify({"mensaje": "Credenciales inválidas"}), 401
+    if not creds or not creds.valid:
+        flow = InstalledAppFlow.from_client_secrets_file(
+            'client_secret.json', SCOPES)
+        creds = flow.run_local_server(port=0)
 
-@app.route('/verify-token', methods=['POST'])
-def verify_token():
-    token = request.json.get('token')
-    
+    service = build('gmail', 'v1', credentials=creds)
+
+    email_message = create_email(subject, message_text, to_email)
+    try:
+        service.users().messages().send(userId='me', body=email_message).execute()
+        print("Correo enviado con éxito.")
+    except Exception as error:
+        print(f"Error al enviar el correo: {error}")
+
+def log_activity(user_id, action, description):
+    """Registra la actividad del usuario."""
+    cursor = get_cursor()
+    try:
+        cursor.execute("INSERT INTO activity_log (user_id, action, description) VALUES (%s, %s, %s)", 
+                       (user_id, action, description))
+        mysql.connection.commit()
+    finally:
+        cursor.close()
+
+def verify_token(token):
+    """Verifica el token y obtiene el rol del usuario."""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
+        username = payload.get("sub")
         
         if username is None:
-            return jsonify({'mensaje': 'Token inválido'}), 401
+            return None
         
         cursor = get_cursor()
         cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
         user_data = cursor.fetchone()
-        
-        if user_data is None:
-            return jsonify({'mensaje': 'Token inválido'}), 401
-
-        return {"role": user_data[8]}  # Devuelve el rol del usuario
-    
-    except jwt.JWTError:
-        return jsonify({'mensaje': 'Token inválido'}), 401
+        return user_data[8] if user_data else None
+    except JWTError:
+        return None
